@@ -197,6 +197,10 @@ class ContentEntryController extends Controller
             $attributes['sort_order'] = $entry->sort_order;
             $attributes['featured'] = $entry->featured;
         } elseif ($typeConfig['type'] === 'news') {
+            $attributes['metadata'] = array_replace(
+                $entry->metadata ?? [],
+                $attributes['metadata'] ?? [],
+            );
             $attributes['featured'] = $entry->featured;
         }
 

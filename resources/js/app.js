@@ -1,11 +1,11 @@
-import { createIcons, Menu, ChevronDown, ArrowUpRight, ArrowRight, GraduationCap, BookOpen, Users, UserCheck, CalendarDays, Newspaper, Flame, MapPin, Phone, Mail, ShieldCheck, UserRound, AtSign, LockKeyhole, Eye, EyeOff, KeyRound, CircleAlert, Info, ArrowLeft, Check, LayoutDashboard, BriefcaseBusiness, Images, HardDrive, Settings2, UsersRound, CircleUserRound, ExternalLink, PanelLeftClose, PanelLeftOpen, LogOut, Activity } from 'lucide';
+import { createIcons, Menu, ChevronDown, ArrowUpRight, ArrowRight, GraduationCap, BookOpen, Users, UserCheck, CalendarDays, Newspaper, Flame, Folder, Grid2x2, ClipboardList, Trophy, MapPin, School, Target, CheckCircle2, Phone, Mail, ShieldCheck, UserRound, AtSign, LockKeyhole, Eye, EyeOff, KeyRound, CircleAlert, Info, ArrowLeft, Check, LayoutDashboard, BriefcaseBusiness, Building2, Search, Filter, RefreshCw, ChartNoAxesColumnIncreasing, FilePenLine, Handshake, Images, HardDrive, Settings2, UsersRound, CircleUserRound, ExternalLink, PanelLeftClose, PanelLeftOpen, LogOut, Activity } from 'lucide';
 
 import AOS from 'aos';
 import 'aos/dist/aos.css';
 import './media-manager.js';
 
 document.addEventListener('DOMContentLoaded', () => {
-        createIcons({
+    createIcons({
         icons: {
             Menu,
             ChevronDown,
@@ -18,21 +18,17 @@ document.addEventListener('DOMContentLoaded', () => {
             CalendarDays,
             Newspaper,
             Flame,
+            Folder,
+            Grid2x2,
+            ClipboardList,
+            Trophy,
             MapPin,
+            School,
+            Target,
+            CheckCircle2,
             Phone,
             Mail,
-        },
-    });
-
-    AOS.init({
-        duration: 650,
-        once: true,
-        offset: 70,
-        easing: 'ease-out-cubic',
-    });
-
-    createIcons({
-        icons: {
+            Check,
             ShieldCheck,
             UserRound,
             AtSign,
@@ -46,6 +42,13 @@ document.addEventListener('DOMContentLoaded', () => {
             Check,
             LayoutDashboard,
             BriefcaseBusiness,
+            Building2,
+            Search,
+            Filter,
+            RefreshCw,
+            ChartNoAxesColumnIncreasing,
+            FilePenLine,
+            Handshake,
             Images,
             HardDrive,
             Settings2,
@@ -57,6 +60,36 @@ document.addEventListener('DOMContentLoaded', () => {
             LogOut,
             Activity,
         },
+    });
+
+    AOS.init({
+        duration: 650,
+        once: true,
+        offset: 70,
+        easing: 'ease-out-cubic',
+    });
+
+    document.querySelectorAll('img[data-news-image]').forEach((image) => {
+        const showFallback = () => {
+            const fallback = image.parentElement?.querySelector('[data-news-image-fallback]');
+
+            if (!fallback) {
+                return;
+            }
+
+            image.hidden = true;
+            fallback.hidden = false;
+        };
+
+        if (image.complete && image.naturalWidth === 0) {
+            showFallback();
+        } else {
+            image.addEventListener('error', showFallback, { once: true });
+        }
+    });
+
+    document.querySelectorAll('select[data-bkk-filter]').forEach((filter) => {
+        filter.addEventListener('change', () => filter.form?.requestSubmit());
     });
 
     const sidebarCollapseToggle = document.querySelector('[data-admin-sidebar-toggle]');

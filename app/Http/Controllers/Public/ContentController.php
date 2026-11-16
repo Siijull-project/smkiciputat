@@ -11,6 +11,8 @@ use App\Support\SiteConfiguration;
 use App\Support\TeacherPhotoFocus;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class ContentController extends Controller
@@ -72,13 +74,13 @@ class ContentController extends Controller
 
     public function news(Request $request): View
     {
+        $filters = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+        ]);
+        $search = trim($filters['search'] ?? '');
         $publishedNews = NewsArticle::query()->published();
-        $categories = (clone $publishedNews)
-            ->whereNotNull('category')
-            ->where('category', '<>', '')
-            ->distinct()
-            ->orderBy('category')
-            ->pluck('category');
+        $categoryCounts = $this->publishedCategoryCounts($publishedNews);
+        $categories = $categoryCounts->keys();
         $category = $request->query('category');
 
         abort_if(
@@ -87,11 +89,33 @@ class ContentController extends Controller
         );
 
         $newsQuery = (clone $publishedNews)
-            ->when($category !== null, fn (Builder $query): Builder => $query->where('category', $category));
+            ->when($category !== null, fn (Builder $query): Builder => $query->where('category', $category))
+            ->when($search !== '', function (Builder $query) use ($search): void {
+                $query->where(function (Builder $query) use ($search): void {
+                    $query->where('title', 'like', '%'.$search.'%')
+                        ->orWhere('summary', 'like', '%'.$search.'%')
+                        ->orWhere('body', 'like', '%'.$search.'%')
+                        ->orWhere('category', 'like', '%'.$search.'%');
+                });
+            });
         $featuredArticle = (clone $newsQuery)
+            ->where('metadata->homepage_group', 'featured')
             ->orderByDesc('published_at')
             ->orderByDesc('id')
             ->first();
+
+        if ($featuredArticle === null) {
+            $featuredArticle = (clone $newsQuery)
+                ->orderByDesc('published_at')
+                ->orderByDesc('id')
+                ->first();
+        }
+
+        $popularArticles = (clone $newsQuery)
+            ->orderByDesc('published_at')
+            ->orderByDesc('id')
+            ->limit(3)
+            ->get(['id', 'title', 'slug', 'category', 'image_path', 'published_at', 'metadata']);
         $articles = (clone $newsQuery)
             ->when(
                 $featuredArticle !== null,
@@ -105,8 +129,12 @@ class ContentController extends Controller
         return view('pages.news.index', [
             'articles' => $articles,
             'categories' => $categories,
+            'categoryCounts' => $categoryCounts,
+            'publishedArticleCount' => (clone $publishedNews)->count(),
             'selectedCategory' => $category,
+            'searchTerm' => $search,
             'featuredArticle' => $featuredArticle,
+            'popularArticles' => $popularArticles,
         ]);
     }
 
@@ -117,49 +145,32 @@ class ContentController extends Controller
             ->where('slug', $slug)
             ->firstOrFail();
 
-        [$previousArticle, $nextArticle] = $this->adjacentArticles($article);
-
-        return view('pages.news.show', compact('article', 'previousArticle', 'nextArticle'));
-    }
-
-    /**
-     * @return array{0: ?NewsArticle, 1: ?NewsArticle}
-     */
-    private function adjacentArticles(NewsArticle $article): array
-    {
-        if ($article->published_at === null) {
-            return [null, null];
-        }
-
-        $publishedNews = NewsArticle::query()
-            ->published()
-            ->where('id', '<>', $article->getKey());
-
-        $previousArticle = (clone $publishedNews)
-            ->where(function (Builder $query) use ($article): void {
-                $query->where('published_at', '<', $article->published_at)
-                    ->orWhere(function (Builder $query) use ($article): void {
-                        $query->where('published_at', $article->published_at)
-                            ->where('id', '<', $article->id);
-                    });
-            })
+        $publishedNews = NewsArticle::query()->published();
+        $relatedArticles = (clone $publishedNews)
+            ->where('id', '<>', $article->getKey())
             ->orderByDesc('published_at')
             ->orderByDesc('id')
-            ->first();
+            ->limit(6)
+            ->get(['id', 'slug', 'title', 'category', 'image_path', 'published_at']);
 
-        $nextArticle = (clone $publishedNews)
-            ->where(function (Builder $query) use ($article): void {
-                $query->where('published_at', '>', $article->published_at)
-                    ->orWhere(function (Builder $query) use ($article): void {
-                        $query->where('published_at', $article->published_at)
-                            ->where('id', '>', $article->id);
-                    });
-            })
-            ->orderBy('published_at')
-            ->orderByDesc('id')
-            ->first();
+        return view('pages.news.show', [
+            'article' => $article,
+            'relatedArticles' => $relatedArticles,
+            'categoryCounts' => $this->publishedCategoryCounts($publishedNews),
+            'publishedArticleCount' => (clone $publishedNews)->count(),
+        ]);
+    }
 
-        return [$previousArticle, $nextArticle];
+    private function publishedCategoryCounts(Builder $publishedNews): Collection
+    {
+        return (clone $publishedNews)
+            ->whereNotNull('category')
+            ->where('category', '<>', '')
+            ->select('category')
+            ->selectRaw('COUNT(*) AS articles_count')
+            ->groupBy('category')
+            ->orderBy('category')
+            ->pluck('articles_count', 'category');
     }
 
     public function gallery(): View
@@ -173,19 +184,65 @@ class ContentController extends Controller
         ]);
     }
 
-    public function jobs(): View
+    public function jobs(Request $request): View
     {
+        $activeJobs = JobVacancy::query()
+            ->published()
+            ->where(function (Builder $query): void {
+                $query->whereNull('metadata->closing_date')
+                    ->orWhere('metadata->closing_date', '')
+                    ->orWhereDate('metadata->closing_date', '>=', today());
+            });
+
+        $categories = (clone $activeJobs)
+            ->whereNotNull('category')
+            ->where('category', '<>', '')
+            ->distinct()
+            ->orderBy('category')
+            ->pluck('category');
+
+        $companies = (clone $activeJobs)
+            ->whereNotNull('metadata->company')
+            ->where('metadata->company', '<>', '')
+            ->select('metadata->company as company')
+            ->distinct()
+            ->orderBy('company')
+            ->pluck('company');
+
+        $filters = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+            'category' => ['nullable', 'string', Rule::in($categories->all())],
+            'company' => ['nullable', 'string', Rule::in($companies->all())],
+        ]);
+        $searchTerm = trim($filters['search'] ?? '');
+        $selectedCategory = $filters['category'] ?? '';
+        $selectedCompany = $filters['company'] ?? '';
+
+        $jobs = (clone $activeJobs)
+            ->when($searchTerm !== '', function (Builder $query) use ($searchTerm): void {
+                $query->where(function (Builder $query) use ($searchTerm): void {
+                    $like = '%'.$searchTerm.'%';
+                    $query->where('title', 'like', $like)
+                        ->orWhere('metadata->position', 'like', $like)
+                        ->orWhere('metadata->company', 'like', $like);
+                });
+            })
+            ->when($selectedCategory !== '', fn (Builder $query): Builder => $query->where('category', $selectedCategory))
+            ->when($selectedCompany !== '', fn (Builder $query): Builder => $query->where('metadata->company', $selectedCompany))
+            ->orderByDesc('published_at')
+            ->orderByDesc('id')
+            ->paginate(12)
+            ->withQueryString();
+
         return view('pages.bkk.jobs', [
-            'jobs' => JobVacancy::query()
-                ->published()
-                ->where(function (Builder $query): void {
-                    $query->whereNull('metadata->closing_date')
-                        ->orWhere('metadata->closing_date', '')
-                        ->orWhereDate('metadata->closing_date', '>=', today());
-                })
-                ->orderByDesc('published_at')
-                ->orderByDesc('id')
-                ->paginate(12),
+            'jobs' => $jobs,
+            'searchTerm' => $searchTerm,
+            'jobCategories' => $categories,
+            'jobCompanies' => $companies,
+            'selectedCategory' => $selectedCategory,
+            'selectedCompany' => $selectedCompany,
+            'activeJobsCount' => (clone $activeJobs)->count(),
+            'partnerCompaniesCount' => $companies->count(),
         ]);
     }
 

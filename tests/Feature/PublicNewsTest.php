@@ -52,14 +52,156 @@ class PublicNewsTest extends TestCase
             ->assertSee('Berita 14');
     }
 
-    public function test_article_detail_shows_available_author_gallery_and_adjacent_articles(): void
+    public function test_news_index_prefers_the_admin_selected_featured_article(): void
     {
-        $this->createArticle('Berita Sebelumnya', 'berita-sebelumnya', 'Kegiatan Sekolah', now()->subDays(2));
+        $featuredArticle = $this->createArticle(
+            'Berita Utama Pilihan Admin',
+            'berita-utama-pilihan-admin',
+            'Prestasi',
+            now()->subDays(3),
+            'published',
+            ['homepage_group' => 'featured'],
+        );
+        $this->createArticle(
+            'Berita Terbaru Otomatis',
+            'berita-terbaru-otomatis',
+            'Kegiatan Sekolah',
+            now(),
+            'published',
+            ['homepage_group' => 'auto'],
+        );
+
+        $response = $this->get(route('news.index'));
+        $response->assertOk()
+            ->assertSee('Berita Utama Pilihan Admin')
+            ->assertSee('Berita Terbaru Otomatis');
+
+        $content = $response->getContent() ?? '';
+        $featuredStart = strpos($content, '<article class="news-featured">');
+        $featuredEnd = $featuredStart === false
+            ? false
+            : strpos($content, '</article>', $featuredStart);
+        $this->assertNotFalse($featuredStart);
+        $this->assertNotFalse($featuredEnd);
+
+        $featuredMarkup = substr($content, $featuredStart, $featuredEnd - $featuredStart);
+        $this->assertStringContainsString($featuredArticle->title, $featuredMarkup);
+        $this->assertStringNotContainsString('Berita Terbaru Otomatis', $featuredMarkup);
+    }
+
+    public function test_news_index_searches_published_content_and_combines_with_category_filter(): void
+    {
+        $this->createArticle(
+            'Kegiatan Literasi Digital',
+            'kegiatan-literasi-digital',
+            'Kegiatan Sekolah',
+            now(),
+            'published',
+            [],
+            'Siswa mengikuti lokakarya literasi.',
+        );
+        $this->createArticle(
+            'Kegiatan Olahraga',
+            'kegiatan-olahraga',
+            'Kegiatan Sekolah',
+            now()->subDay(),
+        );
+        $this->createArticle(
+            'Prestasi Literasi',
+            'prestasi-literasi',
+            'Prestasi',
+            now()->subDays(2),
+            'published',
+            [],
+            'Prestasi literasi siswa.',
+        );
+        $this->createArticle(
+            'Draft Literasi',
+            'draft-literasi',
+            'Kegiatan Sekolah',
+            now(),
+            'draft',
+            [],
+            'Draft lokakarya literasi.',
+        );
+
+        $this->get(route('news.index', [
+            'category' => 'Kegiatan Sekolah',
+            'search' => 'literasi',
+        ]))
+            ->assertOk()
+            ->assertSee('Kegiatan Literasi Digital')
+            ->assertSee('name="search"', false)
+            ->assertSee('value="literasi"', false)
+            ->assertSee('category=Prestasi&amp;search=literasi', false)
+            ->assertDontSee('Kegiatan Olahraga')
+            ->assertDontSee('Prestasi Literasi')
+            ->assertDontSee('Draft Literasi');
+
+        $this->get(route('news.index', ['search' => 'tidak-ditemukan']))
+            ->assertOk()
+            ->assertSee('Tidak ada berita yang cocok dengan pencarian')
+            ->assertDontSee('Kegiatan Literasi Digital');
+    }
+
+    public function test_news_index_renders_latest_popular_fallback_and_published_category_counts(): void
+    {
+        $this->createArticle(
+            'Berita Terbaru',
+            'berita-terbaru-portal',
+            'Kegiatan Sekolah',
+            now(),
+            'published',
+            ['author' => 'Redaksi Sekolah'],
+            'Ringkasan berita terbaru.',
+            '/images/berita-terbaru.jpg',
+        );
+        $this->createArticle(
+            'Berita Lebih Lama',
+            'berita-lebih-lama-portal',
+            'Kegiatan Sekolah',
+            now()->subDay(),
+        );
+        $this->createArticle(
+            'Informasi Sekolah',
+            'informasi-sekolah-portal',
+            'Informasi Uji',
+            now()->subDays(2),
+        );
+        $this->createArticle(
+            'Draft Tidak Tampil',
+            'draft-tidak-tampil-portal',
+            'Pengumuman',
+            now(),
+            'draft',
+        );
+
+        $response = $this->get(route('news.index'));
+
+        $response->assertOk()
+            ->assertSee('Portal Berita')
+            ->assertSee('SMK Islamiyah Ciputat')
+            ->assertSee('Berita Terpopuler')
+            ->assertSee('Kategori Berita')
+            ->assertSee('Berita Terbaru')
+            ->assertSee('Redaksi Sekolah')
+            ->assertSee('/images/berita-terbaru.jpg', false)
+            ->assertSee('Informasi Uji')
+            ->assertSee(route('news.index', ['category' => 'Kegiatan Sekolah']), false)
+            ->assertSee('aria-label="3 berita"', false)
+            ->assertSee('aria-label="2 berita"', false)
+            ->assertDontSee('Draft Tidak Tampil');
+    }
+
+    public function test_article_detail_shows_six_latest_other_published_articles(): void
+    {
+        $this->travelTo('2026-11-17 10:00:00');
+
         $article = $this->createArticle(
             'Berita Utama',
             'berita-utama',
             'Prestasi',
-            now()->subDay(),
+            now()->subDays(10),
             'published',
             [
                 'author' => 'Redaksi Sekolah',
@@ -68,10 +210,27 @@ class PublicNewsTest extends TestCase
             "Paragraf pertama.\n\nParagraf kedua.",
             '/images/berita-utama.jpg',
         );
-        $this->createArticle('Berita Berikutnya', 'berita-berikutnya', 'Kegiatan Sekolah', now());
+        for ($index = 1; $index <= 7; $index++) {
+            $this->createArticle(
+                'Berita Lainnya '.$index,
+                'berita-lainnya-'.$index,
+                $index % 2 === 0 ? 'Prestasi' : 'Kegiatan Sekolah',
+                now()->subDays($index),
+                imagePath: '/images/berita-lainnya-'.$index.'.jpg',
+            );
+        }
+        $this->createArticle(
+            'Draft Terbaru',
+            'draft-terbaru',
+            'Pengumuman',
+            now(),
+            'draft',
+            imagePath: '/images/draft-terbaru.jpg',
+        );
 
-        $this->get(route('news.show', $article->slug))
-            ->assertOk()
+        $response = $this->get(route('news.show', $article->slug));
+
+        $response->assertOk()
             ->assertSee('Beranda')
             ->assertSee('Berita')
             ->assertSee('Berita Utama')
@@ -81,14 +240,108 @@ class PublicNewsTest extends TestCase
             ->assertSee('/images/berita-utama.jpg', false)
             ->assertSee('/images/berita-satu.jpg', false)
             ->assertSee('/images/berita-dua.jpg', false)
-            ->assertSee('Berita Sebelumnya')
-            ->assertSee('Berita Berikutnya')
+            ->assertSee('Portal Berita<br>SMK Islamiyah Ciputat', false)
+            ->assertSee('Berita Lainnya')
+            ->assertSee('Berita Terkait')
+            ->assertSee('Kategori Berita')
+            ->assertSee('Kegiatan Sekolah')
+            ->assertSee('Prestasi')
+            ->assertSee('aria-label="8 berita"', false)
+            ->assertSee(route('news.index', ['category' => 'Kegiatan Sekolah']), false)
+            ->assertSee('/images/berita-lainnya-1.jpg', false)
+            ->assertDontSee('Berita Lainnya 7')
+            ->assertDontSee('Draft Terbaru')
+            ->assertDontSee('Berita Sebelumnya')
+            ->assertDontSee('Berita Berikutnya')
             ->assertSee('https://wa.me/', false)
             ->assertSee('https://www.facebook.com/sharer/sharer.php', false)
             ->assertDontSee('dibaca');
+
+        $content = $response->getContent() ?? '';
+        $sectionStart = strpos($content, '<section class="news-related-articles"');
+        $this->assertNotFalse($sectionStart);
+
+        $sectionEnd = strpos($content, '</section>', $sectionStart);
+        $this->assertNotFalse($sectionEnd);
+
+        $sectionMarkup = substr($content, $sectionStart, $sectionEnd - $sectionStart);
+        $this->assertSame(6, substr_count($sectionMarkup, 'class="news-related-card"'));
+        $this->assertStringNotContainsString($article->slug, $sectionMarkup);
+        $this->assertStringNotContainsString('/images/berita-lainnya-7.jpg', $sectionMarkup);
+
+        $expectedUrls = [];
+        for ($index = 1; $index <= 6; $index++) {
+            $expectedUrls[] = route('news.show', 'berita-lainnya-'.$index);
+        }
+
+        preg_match_all('/<a class="news-related-card__link" href="([^"]+)"/', $sectionMarkup, $matches);
+        $this->assertSame($expectedUrls, $matches[1]);
+
+        $sidebarStart = strpos($content, '<aside class="news-detail-sidebar"');
+        $this->assertNotFalse($sidebarStart);
+
+        $sidebarEnd = strpos($content, '</aside>', $sidebarStart);
+        $this->assertNotFalse($sidebarEnd);
+
+        $sidebarMarkup = substr($content, $sidebarStart, $sidebarEnd - $sidebarStart);
+        $this->assertSame(2, substr_count($sidebarMarkup, 'aria-label="4 berita"'));
+        $this->assertStringNotContainsString('Pengumuman', $sidebarMarkup);
+
+        $sidebarListStart = strpos($sidebarMarkup, '<ol class="news-detail-related-list">');
+        $this->assertNotFalse($sidebarListStart);
+
+        $sidebarListEnd = strpos($sidebarMarkup, '</ol>', $sidebarListStart);
+        $this->assertNotFalse($sidebarListEnd);
+
+        $sidebarListMarkup = substr($sidebarMarkup, $sidebarListStart, $sidebarListEnd - $sidebarListStart);
+        $expectedSidebarUrls = [];
+        for ($index = 1; $index <= 3; $index++) {
+            $expectedSidebarUrls[] = route('news.show', 'berita-lainnya-'.$index);
+        }
+
+        preg_match_all('/<a class="news-detail-related-item__link" href="([^"]+)"/', $sidebarListMarkup, $sidebarMatches);
+        $this->assertSame($expectedSidebarUrls, $sidebarMatches[1]);
     }
 
-    public function test_article_detail_hides_unavailable_author_gallery_and_navigation(): void
+    public function test_article_detail_shows_fewer_than_six_available_related_articles(): void
+    {
+        $this->travelTo('2026-11-17 10:00:00');
+
+        $article = $this->createArticle('Berita Utama', 'berita-utama', 'Prestasi', now());
+        $this->createArticle(
+            'Berita Terbaru',
+            'berita-terbaru',
+            'Kegiatan Sekolah',
+            now()->subDay(),
+            imagePath: '/images/berita-terbaru.jpg',
+        );
+        $this->createArticle(
+            'Berita Sebelumnya',
+            'berita-sebelumnya',
+            'Prestasi',
+            now()->subDays(2),
+            imagePath: '/images/berita-sebelumnya.jpg',
+        );
+
+        $response = $this->get(route('news.show', $article->slug));
+
+        $response->assertOk()
+            ->assertSee('Berita Lainnya')
+            ->assertSee('Berita Terbaru')
+            ->assertSee('Berita Sebelumnya');
+
+        $content = $response->getContent() ?? '';
+        $sectionStart = strpos($content, '<section class="news-related-articles"');
+        $this->assertNotFalse($sectionStart);
+
+        $sectionEnd = strpos($content, '</section>', $sectionStart);
+        $this->assertNotFalse($sectionEnd);
+
+        $sectionMarkup = substr($content, $sectionStart, $sectionEnd - $sectionStart);
+        $this->assertSame(2, substr_count($sectionMarkup, 'class="news-related-card"'));
+    }
+
+    public function test_article_detail_without_other_published_articles_hides_related_news(): void
     {
         $article = $this->createArticle(
             'Berita Tunggal',
@@ -99,8 +352,7 @@ class PublicNewsTest extends TestCase
 
         $this->get(route('news.show', $article->slug))
             ->assertOk()
-            ->assertDontSee('Berita Sebelumnya')
-            ->assertDontSee('Berita Berikutnya')
+            ->assertDontSee('news-related-articles')
             ->assertDontSee('news-article-gallery')
             ->assertDontSee('Redaksi Sekolah');
     }

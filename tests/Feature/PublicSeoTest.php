@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\NewsArticle;
 use App\Models\Program;
+use App\Models\SiteSetting;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -35,6 +36,51 @@ class PublicSeoTest extends TestCase
             ->assertSee('Galeri Sekolah')
             ->assertSee('Belum ada foto galeri sekolah yang dipublikasikan.')
             ->assertDontSee('Perjalanan Sekolah');
+    }
+
+    public function test_about_page_renders_school_identity_and_statistics_from_existing_data(): void
+    {
+        foreach ([
+            'about.title' => 'Tentang SMK Islamiyah Ciputat',
+            'about.description' => 'Profil resmi sekolah dari pengaturan admin.',
+            'about.image' => '/images/10.jpeg',
+            'about.vision' => 'Menjadi sekolah kejuruan yang unggul.',
+            'about.mission' => "Menyelenggarakan pendidikan berkualitas.\nMembentuk karakter peserta didik.",
+            'home.about.image_alt' => 'Siswa dan guru SMK Islamiyah Ciputat',
+            'home.about.paragraph_1' => 'SMK Islamiyah Ciputat mendampingi siswa berkembang.',
+            'home.stats.student_count' => '1.000',
+            'home.stats.teacher_count' => '10',
+            'identity.location' => 'Ciputat, Tangerang Selatan',
+        ] as $key => $value) {
+            SiteSetting::query()->create([
+                'key' => $key,
+                'group' => explode('.', $key)[0],
+                'value' => json_encode($value, JSON_THROW_ON_ERROR),
+            ]);
+        }
+
+        Program::query()->create([
+            'title' => 'Program Keahlian Aktif',
+            'slug' => 'program-keahlian-aktif-about',
+            'status' => 'published',
+        ]);
+
+        $response = $this->get(route('about'));
+
+        $response->assertOk()
+            ->assertSee('Tentang SMK Islamiyah Ciputat')
+            ->assertSee('Profil resmi sekolah dari pengaturan admin.')
+            ->assertSee('/images/10.jpeg')
+            ->assertSee('Siswa dan guru SMK Islamiyah Ciputat')
+            ->assertSee('Menjadi sekolah kejuruan yang unggul.')
+            ->assertSee('Menyelenggarakan pendidikan berkualitas.')
+            ->assertSee('Membentuk karakter peserta didik.')
+            ->assertSee('Ciputat, Tangerang Selatan')
+            ->assertSee('1.000')
+            ->assertSee('Program Keahlian')
+            ->assertSee('Tenaga Pendidik')
+            ->assertDontSee('Tahun Berdiri')
+            ->assertDontSee('Akreditasi');
     }
 
     public function test_news_page_emits_article_metadata_and_structured_data(): void

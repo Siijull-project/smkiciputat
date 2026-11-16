@@ -43,8 +43,8 @@
                             <i data-lucide="chevron-down" class="dropdown-arrow"></i>
                         </a>
                         <div class="dropdown-menu" id="bkkMenu" aria-labelledby="bkkDropdown">
-                            <a href="{{ route('bkk.jobs') }}">Lowongan Pekerjaan</a>
-                            <a href="{{ route('bkk.tracer-study') }}">Tracer Study</a>
+                            <a class="{{ request()->routeIs('bkk.jobs') ? 'active' : '' }}" href="{{ route('bkk.jobs') }}" @if (request()->routeIs('bkk.jobs')) aria-current="page" @endif>Lowongan Pekerjaan</a>
+                            <a class="{{ request()->routeIs('bkk.tracer-study') ? 'active' : '' }}" href="{{ route('bkk.tracer-study') }}" @if (request()->routeIs('bkk.tracer-study')) aria-current="page" @endif>Tracer Study</a>
                         </div>
                     </div>
                 @else

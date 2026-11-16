@@ -357,6 +357,185 @@ class CmsAdminTest extends TestCase
             ->assertSee('Berita utama (1 slot) (Terjadwal)');
     }
 
+    public function test_admin_news_crud_stays_synchronized_across_home_portal_and_detail(): void
+    {
+        $this->freezeTime();
+        Storage::fake('public');
+        $admin = $this->createAdmin();
+
+        $this->actingAs($admin, 'admin')
+            ->post(route('admin.content.store', 'news'), [
+                'title' => 'Berita Sinkron',
+                'slug' => 'berita-sinkron',
+                'summary' => 'Ringkasan berita awal.',
+                'body' => 'Isi berita awal.',
+                'category' => 'Kegiatan Sekolah',
+                'status' => 'published',
+                'published_at' => now()->format('Y-m-d\TH:i'),
+                'metadata' => ['homepage_group' => 'auto'],
+                'image' => UploadedFile::fake()->image('berita-awal.jpg', 600, 400),
+            ])
+            ->assertRedirect(route('admin.content.index', 'news'));
+
+        $article = NewsArticle::query()->where('slug', 'berita-sinkron')->firstOrFail();
+        $oldImagePath = $article->image_path;
+
+        $article->update([
+            'metadata' => [
+                'homepage_group' => 'auto',
+                'author' => 'Redaksi Sekolah',
+                'images' => ['/images/galeri-berita.jpg'],
+            ],
+        ]);
+
+        $this->assertSame(1, NewsArticle::query()->count());
+        $this->assertDatabaseMissing('content_entries', [
+            'type' => 'news',
+            'slug' => $article->slug,
+        ]);
+        Storage::disk('public')->assertExists($oldImagePath);
+        $this->actingAs($admin, 'admin')
+            ->get(route('admin.content.edit', ['type' => 'news', 'entry' => $article]))
+            ->assertOk()
+            ->assertSee($oldImagePath, false);
+
+        $this->get(route('home'))
+            ->assertOk()
+            ->assertSee('Berita Sinkron')
+            ->assertSee('Ringkasan berita awal.')
+            ->assertSee(route('news.show', $article->slug), false)
+            ->assertSee($oldImagePath, false);
+        $this->get(route('news.index'))
+            ->assertOk()
+            ->assertSee('Berita Sinkron')
+            ->assertSee('Kegiatan Sekolah')
+            ->assertSee($oldImagePath, false);
+        $this->get(route('news.show', $article->slug))
+            ->assertOk()
+            ->assertSee('Isi berita awal.')
+            ->assertSee('Redaksi Sekolah')
+            ->assertSee('/images/galeri-berita.jpg', false)
+            ->assertSee($oldImagePath, false);
+
+        $this->actingAs($admin, 'admin')
+            ->put(route('admin.content.update', ['type' => 'news', 'entry' => $article]), [
+                'title' => 'Berita Sinkron Diperbarui',
+                'slug' => 'berita-sinkron-diperbarui',
+                'summary' => 'Ringkasan berita terbaru.',
+                'body' => 'Isi berita terbaru.',
+                'category' => 'Prestasi',
+                'status' => 'draft',
+                'published_at' => now()->format('Y-m-d\TH:i'),
+                'metadata' => ['homepage_group' => 'auto'],
+                'image' => UploadedFile::fake()->image('berita-terbaru.jpg', 800, 600),
+            ])
+            ->assertRedirect(route('admin.content.index', 'news'));
+
+        $article->refresh();
+        $draftImagePath = $article->image_path;
+        $this->assertSame('Redaksi Sekolah', $article->metadata['author']);
+        $this->assertSame(['/images/galeri-berita.jpg'], $article->metadata['images']);
+        $this->assertSame('Prestasi', $article->category);
+        Storage::disk('public')->assertMissing($oldImagePath);
+        Storage::disk('public')->assertExists($draftImagePath);
+        $this->actingAs($admin, 'admin')
+            ->get(route('admin.content.edit', ['type' => 'news', 'entry' => $article]))
+            ->assertOk()
+            ->assertSee($draftImagePath, false);
+
+        $this->get(route('home'))
+            ->assertOk()
+            ->assertDontSee('Berita Sinkron Diperbarui');
+        $this->get(route('news.index'))
+            ->assertOk()
+            ->assertDontSee('Berita Sinkron Diperbarui');
+        $this->get(route('news.show', $article->slug))
+            ->assertNotFound();
+
+        $this->actingAs($admin, 'admin')
+            ->put(route('admin.content.update', ['type' => 'news', 'entry' => $article]), [
+                'title' => $article->title,
+                'slug' => $article->slug,
+                'summary' => $article->summary,
+                'body' => $article->body,
+                'category' => $article->category,
+                'status' => 'published',
+                'published_at' => now()->format('Y-m-d\TH:i'),
+                'metadata' => ['homepage_group' => 'auto'],
+            ])
+            ->assertRedirect(route('admin.content.index', 'news'));
+
+        $this->get(route('home'))
+            ->assertOk()
+            ->assertSee('Berita Sinkron Diperbarui')
+            ->assertSee('Ringkasan berita terbaru.')
+            ->assertSee(route('news.show', $article->slug), false)
+            ->assertSee($draftImagePath, false);
+        $this->get(route('news.index'))
+            ->assertOk()
+            ->assertSee('Berita Sinkron Diperbarui')
+            ->assertSee('Prestasi')
+            ->assertSee($draftImagePath, false);
+        $this->get(route('news.show', $article->slug))
+            ->assertOk()
+            ->assertSee('Isi berita terbaru.')
+            ->assertSee('Redaksi Sekolah')
+            ->assertSee('/images/galeri-berita.jpg', false)
+            ->assertSee($draftImagePath, false);
+        $this->get(route('news.show', 'berita-sinkron'))
+            ->assertNotFound();
+
+        $this->actingAs($admin, 'admin')
+            ->delete(route('admin.content.destroy', ['type' => 'news', 'entry' => $article]))
+            ->assertRedirect(route('admin.content.index', 'news'));
+
+        $this->assertDatabaseMissing('news_articles', ['id' => $article->id]);
+        $this->assertDatabaseHas('content_activities', [
+            'content_type' => 'news',
+            'content_id' => $article->id,
+            'action' => 'deleted',
+        ]);
+        Storage::disk('public')->assertMissing($draftImagePath);
+        $this->get(route('home'))->assertOk()->assertDontSee('Berita Sinkron Diperbarui');
+        $this->get(route('news.index'))->assertOk()->assertDontSee('Berita Sinkron Diperbarui');
+        $this->get(route('news.show', 'berita-sinkron-diperbarui'))->assertNotFound();
+    }
+
+    public function test_deleting_news_preserves_a_photo_still_used_by_another_article(): void
+    {
+        Storage::fake('public');
+        Storage::disk('public')->put('cms/news/shared.jpg', 'image-data');
+        $admin = $this->createAdmin();
+        $firstArticle = NewsArticle::query()->create([
+            'title' => 'Berita Foto Bersama Pertama',
+            'slug' => 'berita-foto-bersama-pertama',
+            'image_path' => 'cms/news/shared.jpg',
+            'status' => 'published',
+            'published_at' => now(),
+        ]);
+        $secondArticle = NewsArticle::query()->create([
+            'title' => 'Berita Foto Bersama Kedua',
+            'slug' => 'berita-foto-bersama-kedua',
+            'image_path' => 'cms/news/shared.jpg',
+            'status' => 'published',
+            'published_at' => now()->subMinute(),
+        ]);
+
+        $this->actingAs($admin, 'admin')
+            ->delete(route('admin.content.destroy', ['type' => 'news', 'entry' => $firstArticle]))
+            ->assertRedirect(route('admin.content.index', 'news'));
+
+        $this->assertDatabaseMissing('news_articles', ['id' => $firstArticle->id]);
+        $this->assertDatabaseHas('news_articles', ['id' => $secondArticle->id]);
+        Storage::disk('public')->assertExists('cms/news/shared.jpg');
+
+        $this->actingAs($admin, 'admin')
+            ->delete(route('admin.content.destroy', ['type' => 'news', 'entry' => $secondArticle]))
+            ->assertRedirect(route('admin.content.index', 'news'));
+
+        Storage::disk('public')->assertMissing('cms/news/shared.jpg');
+    }
+
     public function test_admin_rejects_an_unknown_homepage_placement(): void
     {
         $admin = $this->createAdmin();
