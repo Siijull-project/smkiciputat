@@ -33,15 +33,52 @@
                     @php
                         $fieldName = \Illuminate\Support\Str::after($key, $section.'.');
                         $inputName = 'settings['.$section.']['.str_replace('.', '][', $fieldName).']';
+                        $settingPath = 'settings.'.$key;
                         $value = old('settings.'.$key, $values[$key] ?? null);
                     @endphp
-                    <div class="admin-field {{ in_array($field['type'], ['textarea', 'image'], true) ? 'admin-field-full' : '' }}">
+                    <div class="admin-field {{ in_array($field['type'], ['textarea', 'image', 'video_source'], true) ? 'admin-field-full' : '' }}">
                         @if ($field['type'] === 'checkbox')
                             <input type="hidden" name="{{ $inputName }}" value="0">
                             <label class="admin-checkbox-label">
                                 <input type="checkbox" name="{{ $inputName }}" value="1" @checked((bool) $value)>
                                 <span>{{ $field['label'] }}</span>
                             </label>
+                        @elseif ($field['type'] === 'video_source')
+                            @php
+                                $videoValue = is_string($value) ? $value : '';
+                                $currentAsset = $videoAssets->first(fn (\App\Models\MediaAsset $asset): bool => $asset->publicPath() === $videoValue);
+                                $youtubeId = \App\Support\VideoSource::youtubeId($videoValue);
+                                $source = old($settingPath.'.source', $currentAsset ? 'media' : ($videoValue === '' ? 'none' : 'url'));
+                                $videoUrl = old($settingPath.'.url', $youtubeId && ! str_starts_with($videoValue, 'http')
+                                    ? 'https://youtu.be/'.$youtubeId
+                                    : ($currentAsset ? '' : $videoValue));
+                                $assetId = old($settingPath.'.asset_id', $currentAsset?->id);
+                            @endphp
+                            <label for="setting-{{ str_replace('.', '-', $key) }}-source">{{ $field['label'] }}</label>
+                            <select id="setting-{{ str_replace('.', '-', $key) }}-source" name="{{ $inputName }}[source]">
+                                <option value="none" @selected($source === 'none')>Tidak ditampilkan</option>
+                                <option value="media" @selected($source === 'media')>Pilih dari Media Manager</option>
+                                <option value="url" @selected($source === 'url')>Gunakan URL video</option>
+                            </select>
+                            <label for="setting-{{ str_replace('.', '-', $key) }}-url">URL YouTube atau tautan langsung MP4/WebM/OGG</label>
+                            <input
+                                id="setting-{{ str_replace('.', '-', $key) }}-url"
+                                name="{{ $inputName }}[url]"
+                                type="url"
+                                value="{{ $videoUrl }}"
+                                placeholder="https://youtu.be/... atau https://.../video.mp4"
+                            >
+                            <label for="setting-{{ str_replace('.', '-', $key) }}-asset">Video tersimpan</label>
+                            <select id="setting-{{ str_replace('.', '-', $key) }}-asset" name="{{ $inputName }}[asset_id]">
+                                <option value="">Pilih video dari Media Manager</option>
+                                @foreach ($videoAssets as $asset)
+                                    <option value="{{ $asset->id }}" @selected((string) $assetId === (string) $asset->id)>{{ $asset->filename }}</option>
+                                @endforeach
+                            </select>
+                            <small>
+                                <a href="{{ route('admin.media.index', ['type' => 'video']) }}">Unggah atau kelola video di Media Manager</a>.
+                                Satu slot hanya memakai sumber yang dipilih.
+                            </small>
                         @else
                             <label for="setting-{{ str_replace('.', '-', $key) }}">{{ $field['label'] }}</label>
                             @if ($field['type'] === 'textarea')
@@ -74,6 +111,9 @@
                             @endif
                         @endif
                         @error('settings.'.$key)<small class="admin-field-error">{{ $message }}</small>@enderror
+                        @error('settings.'.$key.'.source')<small class="admin-field-error">{{ $message }}</small>@enderror
+                        @error('settings.'.$key.'.url')<small class="admin-field-error">{{ $message }}</small>@enderror
+                        @error('settings.'.$key.'.asset_id')<small class="admin-field-error">{{ $message }}</small>@enderror
                         @error('uploads.'.$key)<small class="admin-field-error">{{ $message }}</small>@enderror
                     </div>
                 @endforeach

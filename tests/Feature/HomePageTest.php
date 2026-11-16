@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\GalleryPhoto;
 use App\Models\NewsArticle;
 use App\Models\PrincipalWelcome;
+use App\Models\SiteSetting;
 use App\Models\Teacher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -218,9 +220,10 @@ class HomePageTest extends TestCase
         $response = $this->get(route('home'));
 
         $response->assertOk()
-            ->assertSee('data-news-featured-rotator', false)
+            ->assertSee('data-news-track', false)
             ->assertSee('Berita Sekolah Lainnya')
-            ->assertSee('Berita Lainnya')
+            ->assertSee('Berita Populer')
+            ->assertSee('Kegiatan Terbaru')
             ->assertDontSee('Berita Hanya di Halaman Berita');
 
         for ($index = 1; $index <= 14; $index++) {
@@ -232,12 +235,11 @@ class HomePageTest extends TestCase
 
         $content = $response->getContent() ?? '';
 
-        $this->assertSame(1, substr_count($content, 'data-news-featured-slide'));
-        $this->assertSame(5, substr_count($content, 'data-news-carousel-item'));
-        $this->assertSame(3, substr_count($content, 'data-news-below-carousel-item'));
-        $this->assertSame(5, substr_count($content, 'data-news-sidebar-item'));
-        $this->assertSame(3, substr_count($content, 'class="news-below-carousel-card__image"'));
-        $this->assertSame(5, substr_count($content, 'class="news-sidebar-image"'));
+        $this->assertSame(7, substr_count($content, 'data-news-carousel-item'));
+        $this->assertSame(6, substr_count($content, 'data-news-below-carousel-item'));
+        $this->assertSame(3, substr_count($content, 'data-news-sidebar-item'));
+        $this->assertSame(6, substr_count($content, 'class="news-below-carousel-card__image"'));
+        $this->assertSame(3, substr_count($content, 'class="news-popular-item__image"'));
 
         $this->get(route('news.index'))
             ->assertOk()
@@ -276,9 +278,89 @@ class HomePageTest extends TestCase
         $response->assertDontSee('Berita Otomatis 14');
 
         $content = $response->getContent() ?? '';
-        $this->assertSame(1, substr_count($content, 'data-news-featured-slide'));
-        $this->assertSame(5, substr_count($content, 'data-news-carousel-item'));
-        $this->assertSame(3, substr_count($content, 'data-news-below-carousel-item'));
-        $this->assertSame(5, substr_count($content, 'data-news-sidebar-item'));
+        $this->assertSame(8, substr_count($content, 'data-news-carousel-item'));
+        $this->assertSame(6, substr_count($content, 'data-news-below-carousel-item'));
+        $this->assertSame(3, substr_count($content, 'data-news-sidebar-item'));
+    }
+
+    public function test_homepage_limits_the_below_carousel_news_cards_to_six(): void
+    {
+        for ($index = 1; $index <= 6; $index++) {
+            NewsArticle::query()->create([
+                'title' => "Berita Tambahan {$index}",
+                'slug' => "berita-tambahan-{$index}",
+                'status' => 'published',
+                'published_at' => now()->subMinutes($index),
+                'image_path' => "/images/berita-{$index}.jpg",
+                'metadata' => ['homepage_group' => 'below_carousel'],
+            ]);
+        }
+
+        $response = $this->get(route('home'));
+
+        $response->assertOk();
+        $content = $response->getContent() ?? '';
+        $this->assertSame(6, substr_count($content, 'data-news-below-carousel-item'));
+        $response->assertSee('Berita Tambahan 1')
+            ->assertSee('Berita Tambahan 6');
+    }
+
+    public function test_homepage_uses_the_three_latest_published_articles_for_popular_news(): void
+    {
+        for ($index = 1; $index <= 4; $index++) {
+            NewsArticle::query()->create([
+                'title' => "Populer Terbaru {$index}",
+                'slug' => "populer-terbaru-{$index}",
+                'status' => 'published',
+                'published_at' => now()->subMinutes($index),
+                'metadata' => ['homepage_group' => 'auto'],
+            ]);
+        }
+
+        $response = $this->get(route('home'));
+
+        $response->assertOk();
+        $popularSection = substr(
+            $response->getContent() ?? '',
+            strpos($response->getContent() ?? '', '<section class="news-popular-panel"'),
+        );
+        $popularSection = substr($popularSection, 0, strpos($popularSection, '</section>') + strlen('</section>'));
+
+        $this->assertSame(3, substr_count($popularSection, 'data-news-sidebar-item'));
+        $this->assertStringContainsString('Populer Terbaru 1', $popularSection);
+        $this->assertStringContainsString('Populer Terbaru 2', $popularSection);
+        $this->assertStringContainsString('Populer Terbaru 3', $popularSection);
+        $this->assertStringNotContainsString('Populer Terbaru 4', $popularSection);
+    }
+
+    public function test_homepage_links_to_configured_videos_from_the_latest_activity(): void
+    {
+        GalleryPhoto::query()->create([
+            'title' => 'Kegiatan Robotika',
+            'slug' => 'kegiatan-robotika',
+            'summary' => 'Kegiatan pembelajaran siswa.',
+            'image_path' => '/images/5.jpg',
+            'status' => 'published',
+            'published_at' => now(),
+        ]);
+
+        foreach ([
+            'home.news.video_1' => 'https://www.youtube.com/watch?v=AbCdeFGhi12',
+            'home.news.video_2' => 'https://cdn.example.test/videos/kegiatan-sekolah.mp4',
+        ] as $key => $value) {
+            SiteSetting::query()->create([
+                'key' => $key,
+                'group' => 'home',
+                'value' => json_encode($value, JSON_THROW_ON_ERROR),
+            ]);
+        }
+
+        $response = $this->get(route('home'));
+
+        $response->assertOk()
+            ->assertSee('class="news-activity-play"', false)
+            ->assertSee('href="https://www.youtube.com/watch?v=AbCdeFGhi12"', false)
+            ->assertSee('href="https://cdn.example.test/videos/kegiatan-sekolah.mp4"', false)
+            ->assertSee('Kegiatan Robotika');
     }
 }

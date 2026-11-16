@@ -3,14 +3,17 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\MediaAsset;
 use App\Models\SiteSetting;
 use App\Support\PublicImageStorage;
 use App\Support\SiteConfiguration;
+use App\Support\VideoSource;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class SettingsController extends Controller
@@ -32,6 +35,10 @@ class SettingsController extends Controller
             'sections' => $sections,
             'fields' => $fields,
             'values' => $configuration->all(),
+            'videoAssets' => MediaAsset::query()
+                ->where('media_type', 'video')
+                ->latest('id')
+                ->get(),
         ]);
     }
 
@@ -51,6 +58,35 @@ class SettingsController extends Controller
 
         foreach ($fields as $key => $field) {
             $fieldName = Str::after($key, $section.'.');
+            $settingPath = 'settings.'.$section.'.'.$fieldName;
+
+            if ($field['type'] === 'video_source') {
+                $sourcePath = $settingPath.'.source';
+                $rules[$sourcePath] = ['sometimes', Rule::in(['none', 'media', 'url'])];
+                $rules[$settingPath.'.url'] = [
+                    'exclude_unless:'.$sourcePath.',url',
+                    'required',
+                    'url',
+                    'regex:/^https?:\/\/\S+$/i',
+                    'max:2048',
+                    function (string $attribute, mixed $value, \Closure $fail): void {
+                        if (! is_string($value) || ! VideoSource::supportsUrl($value)) {
+                            $fail('Masukkan URL YouTube atau tautan langsung file MP4, WebM, atau OGG.');
+                        }
+                    },
+                ];
+                $rules[$settingPath.'.asset_id'] = [
+                    'exclude_unless:'.$sourcePath.',media',
+                    'required',
+                    'integer',
+                    Rule::exists('media_assets', 'id')->where(
+                        fn ($query) => $query->where('media_type', 'video'),
+                    ),
+                ];
+
+                continue;
+            }
+
             $rules['settings.'.$section.'.'.$fieldName] = match ($field['type']) {
                 'checkbox' => ['sometimes', 'boolean'],
                 'number' => ['nullable', 'integer', 'between:-1000,1000'],
@@ -96,7 +132,22 @@ class SettingsController extends Controller
             $fieldName = Str::after($key, $section.'.');
             $oldValue = $currentValues[$key] ?? null;
 
-            if ($field['type'] === 'image') {
+            if ($field['type'] === 'video_source') {
+                $source = Arr::get($validatedSettings, 'settings.'.$section.'.'.$fieldName.'.source');
+
+                if ($source === null) {
+                    continue;
+                }
+
+                $value = match ($source) {
+                    'media' => $images->storeFromAsset(
+                        (int) Arr::get($validatedSettings, 'settings.'.$section.'.'.$fieldName.'.asset_id'),
+                        'video',
+                    ),
+                    'url' => trim(Arr::get($validatedSettings, 'settings.'.$section.'.'.$fieldName.'.url')),
+                    default => null,
+                };
+            } elseif ($field['type'] === 'image') {
                 $newFile = $request->file('uploads.'.$section.'.'.$fieldName);
                 $assetId = $request->input('media_asset_ids.'.$section.'.'.$fieldName);
                 $removeImage = $request->boolean('remove_images.'.$section.'.'.$fieldName);

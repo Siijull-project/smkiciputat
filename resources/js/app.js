@@ -1,4 +1,4 @@
-import { createIcons, Menu, ChevronDown, ArrowUpRight, ArrowRight, GraduationCap, BookOpen, Users, UserCheck, CalendarDays, Newspaper, MapPin, Phone, Mail, ShieldCheck, UserRound, AtSign, LockKeyhole, Eye, EyeOff, KeyRound, CircleAlert, Info, ArrowLeft, Check, LayoutDashboard, BriefcaseBusiness, Images, HardDrive, Settings2, UsersRound, CircleUserRound, ExternalLink, PanelLeftClose, PanelLeftOpen, LogOut, Activity } from 'lucide';
+import { createIcons, Menu, ChevronDown, ArrowUpRight, ArrowRight, GraduationCap, BookOpen, Users, UserCheck, CalendarDays, Newspaper, Flame, MapPin, Phone, Mail, ShieldCheck, UserRound, AtSign, LockKeyhole, Eye, EyeOff, KeyRound, CircleAlert, Info, ArrowLeft, Check, LayoutDashboard, BriefcaseBusiness, Images, HardDrive, Settings2, UsersRound, CircleUserRound, ExternalLink, PanelLeftClose, PanelLeftOpen, LogOut, Activity } from 'lucide';
 
 import AOS from 'aos';
 import 'aos/dist/aos.css';
@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
             UserCheck,
             CalendarDays,
             Newspaper,
+            Flame,
             MapPin,
             Phone,
             Mail,
@@ -407,91 +408,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    const featuredNewsRotator = document.querySelector('[data-news-featured-rotator]');
-
-    if (featuredNewsRotator) {
-        const featuredSlides = [...featuredNewsRotator.querySelectorAll('[data-news-featured-slide]')];
-        const featuredControls = [
-            ...featuredNewsRotator.querySelectorAll('[data-news-featured-direction]'),
-        ];
-
-        if (featuredSlides.length > 1) {
-            const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-            let activeSlideIndex = featuredSlides.findIndex((slide) => slide.classList.contains('is-active'));
-            let rotationTimer;
-            let pointerIsOver = false;
-            let focusIsWithin = false;
-
-            const clearRotation = () => {
-                if (rotationTimer !== undefined) {
-                    window.clearInterval(rotationTimer);
-                    rotationTimer = undefined;
-                }
-            };
-
-            const activateSlide = (slideIndex) => {
-                activeSlideIndex = (slideIndex + featuredSlides.length) % featuredSlides.length;
-
-                featuredSlides.forEach((slide, index) => {
-                    const isActive = index === activeSlideIndex;
-
-                    slide.classList.toggle('is-active', isActive);
-                    slide.setAttribute('aria-hidden', String(!isActive));
-                });
-            };
-
-            const startRotation = () => {
-                clearRotation();
-
-                if (prefersReducedMotion.matches || document.hidden || pointerIsOver || focusIsWithin) {
-                    return;
-                }
-
-                rotationTimer = window.setInterval(() => {
-                    activateSlide(activeSlideIndex + 1);
-                }, 5000);
-            };
-
-            featuredControls.forEach((button) => {
-                button.addEventListener('click', () => {
-                    const direction = button.dataset.newsFeaturedDirection === 'previous' ? -1 : 1;
-
-                    activateSlide(activeSlideIndex + direction);
-                    startRotation();
-                });
-            });
-
-            featuredNewsRotator.addEventListener('pointerenter', (event) => {
-                if (event.pointerType === 'mouse') {
-                    pointerIsOver = true;
-                    clearRotation();
-                }
-            });
-
-            featuredNewsRotator.addEventListener('pointerleave', (event) => {
-                if (event.pointerType === 'mouse') {
-                    pointerIsOver = false;
-                    startRotation();
-                }
-            });
-
-            featuredNewsRotator.addEventListener('focusin', () => {
-                focusIsWithin = true;
-                clearRotation();
-            });
-
-            featuredNewsRotator.addEventListener('focusout', (event) => {
-                if (!featuredNewsRotator.contains(event.relatedTarget)) {
-                    focusIsWithin = false;
-                    startRotation();
-                }
-            });
-
-            document.addEventListener('visibilitychange', startRotation);
-            startRotation();
-        }
-    }
-
     const newsCarousel = document.querySelector('[data-news-track]');
 
     if (newsCarousel) {
@@ -597,39 +513,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         renderNewsPageButtons();
         updateNewsScrollButtons();
-    }
-
-    const videoCarousel = document.querySelector('[data-video-track]');
-
-    if (videoCarousel) {
-        const videoScrollButtons = [
-            ...videoCarousel.parentElement.querySelectorAll('[data-video-scroll]'),
-        ];
-
-        const updateVideoScrollButtons = () => {
-            const maxScrollLeft = videoCarousel.scrollWidth - videoCarousel.clientWidth;
-
-            videoScrollButtons.forEach((button) => {
-                button.disabled = button.dataset.videoScroll === 'left'
-                    ? videoCarousel.scrollLeft <= 1
-                    : videoCarousel.scrollLeft >= maxScrollLeft - 1;
-            });
-        };
-
-        videoScrollButtons.forEach((button) => {
-            button.addEventListener('click', () => {
-                const direction = button.dataset.videoScroll === 'left' ? -1 : 1;
-
-                videoCarousel.scrollBy({
-                    left: direction * videoCarousel.clientWidth,
-                    behavior: 'smooth',
-                });
-            });
-        });
-
-        videoCarousel.addEventListener('scroll', updateVideoScrollButtons);
-        window.addEventListener('resize', updateVideoScrollButtons);
-        updateVideoScrollButtons();
     }
 
     const menuToggle = document.getElementById('menuToggle');

@@ -3,18 +3,21 @@
 namespace App\Http\Controllers\Public;
 
 use App\Http\Controllers\Controller;
+use App\Models\GalleryPhoto;
 use App\Models\NewsArticle;
 use App\Models\PrincipalWelcome;
 use App\Models\Program;
 use App\Models\Teacher;
+use App\Support\SiteConfiguration;
 use App\Support\TeacherPhotoFocus;
+use App\Support\VideoSource;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\View\View;
 
 class HomeController extends Controller
 {
-    public function __invoke(TeacherPhotoFocus $photoFocus): View
+    public function __invoke(TeacherPhotoFocus $photoFocus, SiteConfiguration $configuration): View
     {
         $programs = Program::query()
             ->published()
@@ -64,9 +67,7 @@ class HomeController extends Controller
             ->values();
         $belowCarouselNews = $newsWithoutMain
             ->filter(fn (NewsArticle $article): bool => data_get($article->metadata, 'homepage_group') === 'below_carousel')
-            ->values();
-        $sidebarNews = $newsWithoutMain
-            ->filter(fn (NewsArticle $article): bool => data_get($article->metadata, 'homepage_group') === 'sidebar')
+            ->take(6)
             ->values();
         $automaticNews = $newsWithoutMain
             ->reject(fn (NewsArticle $article): bool => in_array(
@@ -74,13 +75,51 @@ class HomeController extends Controller
                 ['carousel', 'below_carousel', 'sidebar', 'news_only'],
                 true,
             ))
+            ->sortByDesc(fn (NewsArticle $article): int => $article->published_at?->getTimestamp() ?? 0)
             ->values();
 
-        $carouselNews = $this->fillNewsSection($carouselNews, $automaticNews, 3);
-        $belowCarouselNews = $this->fillNewsSection($belowCarouselNews, $automaticNews, 3);
-        $sidebarNews = $this->fillNewsSection($sidebarNews, $automaticNews, 5);
-        $carouselNews = $carouselNews->concat($automaticNews)->values();
         $featuredNews = $mainArticle === null ? collect() : collect([$mainArticle]);
+        $carouselNews = $this->fillNewsSection(
+            $carouselNews,
+            $automaticNews,
+            max(0, 3 - $featuredNews->count()),
+        );
+        $belowCarouselNews = $this->fillNewsSection($belowCarouselNews, $automaticNews, 6);
+        $sidebarNews = $newsWithoutMain
+            ->filter(fn (NewsArticle $article): bool => data_get($article->metadata, 'homepage_group') === 'sidebar')
+            ->take(3)
+            ->concat(NewsArticle::query()
+                ->published()
+                ->where(function (Builder $query): void {
+                    $query->whereNull('metadata->homepage_group')
+                        ->orWhere('metadata->homepage_group', '<>', 'news_only');
+                })
+                ->orderByDesc('published_at')
+                ->orderByDesc('id')
+                ->limit(3)
+                ->get(['id', 'title', 'slug', 'image_path', 'published_at', 'metadata']))
+            ->unique('id')
+            ->take(3)
+            ->values();
+        $carouselNews = $featuredNews
+            ->concat($carouselNews)
+            ->concat($automaticNews)
+            ->values();
+        $newsVideos = $this->newsVideos($configuration);
+        $latestActivity = GalleryPhoto::query()
+            ->published()
+            ->whereNotNull('image_path')
+            ->where('image_path', '<>', '')
+            ->orderByDesc('published_at')
+            ->orderByDesc('id')
+            ->first(['id', 'title', 'summary', 'image_path', 'published_at'])
+            ?? $newsWithoutMain->first(fn (NewsArticle $article): bool => filled($article->image_path))
+            ?? $mainArticle;
+        $latestActivityUrl = match (true) {
+            $latestActivity instanceof NewsArticle => route('news.show', $latestActivity->slug),
+            $latestActivity instanceof GalleryPhoto => route('gallery'),
+            default => null,
+        };
 
         return view('pages.home', [
             'programs' => $programs,
@@ -90,7 +129,41 @@ class HomeController extends Controller
             'carouselNews' => $carouselNews,
             'belowCarouselNews' => $belowCarouselNews,
             'sidebarNews' => $sidebarNews,
+            'newsVideos' => $newsVideos,
+            'latestActivity' => $latestActivity,
+            'latestActivityUrl' => $latestActivityUrl,
+            'showAllNewsLink' => NewsArticle::query()->published()->count() > 6,
         ]);
+    }
+
+    /**
+     * @return array<int, array{href: string}>
+     */
+    private function newsVideos(SiteConfiguration $configuration): array
+    {
+        $settings = $configuration->all();
+
+        return collect([
+            $settings['home.news.video_1'] ?? null,
+            $settings['home.news.video_2'] ?? null,
+        ])
+            ->filter(fn (mixed $value): bool => is_string($value) && filled($value))
+            ->map(function (string $value) use ($configuration): array {
+                $youtubeId = VideoSource::youtubeId($value);
+
+                if ($youtubeId !== null) {
+                    return [
+                        'href' => 'https://www.youtube.com/watch?v='.$youtubeId,
+                    ];
+                }
+
+                return [
+                    'href' => $configuration->imageUrl($value),
+                ];
+            })
+            ->filter(fn (array $video): bool => filled($video['href']))
+            ->values()
+            ->all();
     }
 
     /**

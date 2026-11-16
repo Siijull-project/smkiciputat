@@ -9,6 +9,7 @@ use App\Models\NewsArticle;
 use App\Models\PrincipalWelcome;
 use App\Models\SiteSetting;
 use App\Models\Teacher;
+use App\Support\MediaUsage;
 use Database\Seeders\CmsContentSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -610,6 +611,144 @@ class CmsAdminTest extends TestCase
             '/custom-page',
             json_decode(SiteSetting::query()->findOrFail('navbar.home.url')->value, true, flags: JSON_THROW_ON_ERROR),
         );
+    }
+
+    #[DataProvider('supportedHomepageVideoUrls')]
+    public function test_admin_can_save_supported_homepage_video_urls(string $url): void
+    {
+        $admin = $this->createAdmin();
+
+        $this->actingAs($admin, 'admin')
+            ->put(route('admin.settings.update'), [
+                'section' => 'home',
+                'settings' => [
+                    'home' => [
+                        'news' => [
+                            'video_1' => [
+                                'source' => 'url',
+                                'url' => $url,
+                            ],
+                        ],
+                    ],
+                ],
+            ])
+            ->assertRedirect(route('admin.settings.index', ['section' => 'home']));
+
+        $this->assertSame(
+            $url,
+            json_decode(SiteSetting::query()->findOrFail('home.news.video_1')->value, true, flags: JSON_THROW_ON_ERROR),
+        );
+    }
+
+    public static function supportedHomepageVideoUrls(): array
+    {
+        return [
+            'youtube watch URL' => ['https://www.youtube.com/watch?v=AbCdeFGhi12'],
+            'direct video file URL' => ['https://cdn.example.test/videos/kegiatan-sekolah.mp4'],
+        ];
+    }
+
+    public function test_admin_rejects_urls_without_a_supported_video_player(): void
+    {
+        $admin = $this->createAdmin();
+
+        $this->actingAs($admin, 'admin')
+            ->put(route('admin.settings.update'), [
+                'section' => 'home',
+                'settings' => [
+                    'home' => [
+                        'news' => [
+                            'video_1' => [
+                                'source' => 'url',
+                                'url' => 'https://vimeo.com/123456789',
+                            ],
+                        ],
+                    ],
+                ],
+            ])
+            ->assertSessionHasErrors('settings.home.news.video_1.url');
+
+        $this->assertDatabaseMissing('site_settings', ['key' => 'home.news.video_1']);
+    }
+
+    public function test_admin_can_select_a_video_from_media_manager_for_homepage(): void
+    {
+        $admin = $this->createAdmin();
+        $asset = MediaAsset::query()->create([
+            'disk' => 'public',
+            'filename' => 'kegiatan-sekolah.mp4',
+            'original_path' => 'cms/media/videos/kegiatan-sekolah.mp4',
+            'optimized_path' => 'cms/media/videos/kegiatan-sekolah.mp4',
+            'media_type' => 'video',
+            'mime_type' => 'video/mp4',
+            'file_size' => 1024,
+            'optimized_size' => 1024,
+            'quality' => 'original',
+            'category' => 'news',
+        ]);
+
+        $this->actingAs($admin, 'admin')
+            ->get(route('admin.settings.index', ['section' => 'home']))
+            ->assertOk()
+            ->assertSee('kegiatan-sekolah.mp4');
+
+        $this->actingAs($admin, 'admin')
+            ->put(route('admin.settings.update'), [
+                'section' => 'home',
+                'settings' => [
+                    'home' => [
+                        'news' => [
+                            'video_1' => [
+                                'source' => 'media',
+                                'asset_id' => $asset->id,
+                            ],
+                        ],
+                    ],
+                ],
+            ])
+            ->assertRedirect(route('admin.settings.index', ['section' => 'home']));
+
+        $this->assertSame(
+            $asset->publicPath(),
+            json_decode(SiteSetting::query()->findOrFail('home.news.video_1')->value, true, flags: JSON_THROW_ON_ERROR),
+        );
+        $this->assertContains(
+            ['type' => 'Pengaturan Website', 'title' => 'home.news.video_1'],
+            app(MediaUsage::class)->forAssets(collect([$asset]))[$asset->id],
+        );
+    }
+
+    public function test_admin_cannot_select_an_image_as_a_homepage_video(): void
+    {
+        $admin = $this->createAdmin();
+        $asset = MediaAsset::query()->create([
+            'disk' => 'public',
+            'filename' => 'foto-sekolah.jpg',
+            'original_path' => 'cms/media/images/foto-sekolah.jpg',
+            'media_type' => 'image',
+            'mime_type' => 'image/jpeg',
+            'file_size' => 1024,
+            'quality' => 'original',
+            'category' => 'news',
+        ]);
+
+        $this->actingAs($admin, 'admin')
+            ->put(route('admin.settings.update'), [
+                'section' => 'home',
+                'settings' => [
+                    'home' => [
+                        'news' => [
+                            'video_1' => [
+                                'source' => 'media',
+                                'asset_id' => $asset->id,
+                            ],
+                        ],
+                    ],
+                ],
+            ])
+            ->assertSessionHasErrors('settings.home.news.video_1.asset_id');
+
+        $this->assertDatabaseMissing('site_settings', ['key' => 'home.news.video_1']);
     }
 
     #[DataProvider('settingsSections')]
